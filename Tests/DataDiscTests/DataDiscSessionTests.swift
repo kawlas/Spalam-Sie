@@ -65,6 +65,71 @@ final class DataDiscSessionTests: XCTestCase {
         XCTAssertEqual(session.recommendedDiscType, .bdr)
     }
     
+    // MARK: - Staging directory tests
+    
+    func testBuildStagingDirectoryCreatesDirWithFiles() throws {
+        let session = DataDiscSession()
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("dds_staging1_\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        
+        let file1 = tempDir.appendingPathComponent("a.txt")
+        let file2 = tempDir.appendingPathComponent("b.txt")
+        try "hello".write(to: file1, atomically: true, encoding: .utf8)
+        try "world".write(to: file2, atomically: true, encoding: .utf8)
+        try session.addFile(file1)
+        try session.addFile(file2)
+        
+        let stagingURL = try session.buildStagingDirectory()
+        defer { try? FileManager.default.removeItem(at: stagingURL) }
+        
+        var isDir: ObjCBool = false
+        XCTAssertTrue(FileManager.default.fileExists(atPath: stagingURL.path, isDirectory: &isDir))
+        XCTAssertTrue(isDir.boolValue)
+        
+        let contents = try FileManager.default.contentsOfDirectory(atPath: stagingURL.path)
+        XCTAssertEqual(contents.count, 2)
+        XCTAssertTrue(contents.contains("a.txt"))
+        XCTAssertTrue(contents.contains("b.txt"))
+    }
+    
+    func testBuildStagingDirectoryEmptyFilesStillCreatesDir() throws {
+        let session = DataDiscSession()
+        let stagingURL = try session.buildStagingDirectory()
+        defer { try? FileManager.default.removeItem(at: stagingURL) }
+        
+        var isDir: ObjCBool = false
+        XCTAssertTrue(FileManager.default.fileExists(atPath: stagingURL.path, isDirectory: &isDir))
+        XCTAssertTrue(isDir.boolValue)
+        
+        let contents = try FileManager.default.contentsOfDirectory(atPath: stagingURL.path)
+        XCTAssertEqual(contents.count, 0)
+    }
+    
+    func testBuildStagingDirectoryCopiesNotMoves() throws {
+        let session = DataDiscSession()
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("dds_staging2_\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        
+        let sourceFile = tempDir.appendingPathComponent("original.txt")
+        try "original data".write(to: sourceFile, atomically: true, encoding: .utf8)
+        try session.addFile(sourceFile)
+        
+        let stagingURL = try session.buildStagingDirectory()
+        defer { try? FileManager.default.removeItem(at: stagingURL) }
+        
+        // Source file must still exist (copy, not move)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sourceFile.path), "Original file should still exist after staging copy")
+        
+        // Staging also has the file
+        let stagedFile = stagingURL.appendingPathComponent("original.txt")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: stagedFile.path))
+        
+        let stagedContent = try String(contentsOf: stagedFile, encoding: .utf8)
+        XCTAssertEqual(stagedContent, "original data")
+    }
+    
     func testVolumeLabelDefaults() {
         let session = DataDiscSession()
         session.volumeLabel = "MY_BACKUP_2026"

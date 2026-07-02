@@ -87,6 +87,21 @@ public class DataDiscSession: ObservableObject {
         }
     }
     
+    // MARK: - Staging directory
+    
+    /// Create a temporary staging directory and copy all files into it.
+    /// - Returns: URL of the created staging directory.
+    public func buildStagingDirectory() throws -> URL {
+        let staging = FileManager.default.temporaryDirectory
+            .appendingPathComponent("spalam_data_\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+        for url in files {
+            let dest = staging.appendingPathComponent(url.lastPathComponent)
+            try FileManager.default.copyItem(at: url, to: dest)
+        }
+        return staging
+    }
+    
     // MARK: - Burn orchestration
     
     /// Perform a data burn operation.
