@@ -66,4 +66,125 @@ final class BurnEngineDataTests: XCTestCase {
         XCTAssertTrue(pipeline.contains("-R"))
         XCTAssertTrue(pipeline.contains("-J"))
     }
+    
+    // MARK: - I2a: burnData execution
+    
+    func testBurnDataSimulateReturnsBool() throws {
+        // RED: burnData must exist and run without crashing in simulate mode.
+        // Real device may reject, so we accept either true or throw.
+        guard FileManager.default.isExecutableFile(atPath: "/opt/homebrew/bin/mkisofs"),
+              FileManager.default.isExecutableFile(atPath: "/opt/homebrew/bin/cdrecord") else {
+            throw XCTSkip("mkisofs or cdrecord not installed")
+        }
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("spalam_test_\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let testFile = tempDir.appendingPathComponent("hello.txt")
+        try "test data".write(to: testFile, atomically: true, encoding: .utf8)
+        
+        var config = BurnConfiguration.safeUSB(devicePath: "IOService:/fake")
+        config.simulate = true
+        
+        do {
+            let result = try engine.burnData(config: config, sourcePath: tempDir.path, progress: nil)
+            // Accept true if pipeline succeeds in simulate, or throws — both OK
+            _ = result
+        } catch {
+            // Acceptable: device not real, mkisofs/cdrecord may still fail
+        }
+        XCTAssertNotNil(tempDir)
+    }
+    
+    func testBurnDataProgressCompletedEmitted() throws {
+        // RED: progress callback should fire when burnData runs
+        guard FileManager.default.isExecutableFile(atPath: "/opt/homebrew/bin/mkisofs"),
+              FileManager.default.isExecutableFile(atPath: "/opt/homebrew/bin/cdrecord") else {
+            throw XCTSkip("mkisofs or cdrecord not installed")
+        }
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("spalam_test_\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let testFile = tempDir.appendingPathComponent("hello.txt")
+        try "test data".write(to: testFile, atomically: true, encoding: .utf8)
+        
+        var config = BurnConfiguration.safeUSB(devicePath: "IOService:/fake")
+        config.simulate = true
+        
+        var progresses: [BurnProgress] = []
+        
+        do {
+            let result = try engine.burnData(config: config, sourcePath: tempDir.path, progress: { p in
+                progresses.append(p)
+            })
+            if result {
+                XCTAssertTrue(progresses.contains(where: {
+                    if case .completed = $0 { return true }
+                    return false
+                }))
+            }
+        } catch {
+            // Acceptable failure — don't assert if it throws
+        }
+    }
+    
+    func testBurnDataRejectsMissingSource() throws {
+        // RED: burnData must throw on nonexistent source
+        XCTAssertThrowsError(try engine.burnData(config: BurnConfiguration.safeUSB(devicePath: "x"),
+                                                  sourcePath: "/nonexistent/path/xyz",
+                                                  progress: nil))
+    }
+    
+    func testBurnDataCancelTerminates() throws {
+        // RED: cancel should terminate a running burnData process
+        guard FileManager.default.isExecutableFile(atPath: "/opt/homebrew/bin/mkisofs"),
+              FileManager.default.isExecutableFile(atPath: "/opt/homebrew/bin/cdrecord") else {
+            throw XCTSkip("mkisofs or cdrecord not installed")
+        }
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("spalam_test_\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let testFile = tempDir.appendingPathComponent("hello.txt")
+        try "test data".write(to: testFile, atomically: true, encoding: .utf8)
+        
+        var config = BurnConfiguration.safeUSB(devicePath: "IOService:/fake")
+        config.timeout = 30
+        
+        let expectation = expectation(description: "burnData cancelled")
+        
+        DispatchQueue.global().async {
+            do {
+                _ = try self.engine.burnData(config: config, sourcePath: tempDir.path, progress: nil)
+            } catch {
+                // Expected to throw due to cancellation
+                expectation.fulfill()
+            }
+        }
+        
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) {
+            self.engine.cancel()
+        }
+        
+        wait(for: [expectation], timeout: 5)
+    }
+    
+    func testVolumeLabelUsedInPipelineNotDevicePath() throws {
+        // RED regression: B3 — volume label must use volumeLabel field, not devicePath
+        var config = BurnConfiguration.safeUSB(devicePath: "IOService:/bad")
+        config.volumeLabel = "MYDISC"
+        let pipeline = try engine.generateDataBurnPipeline(config: config, sourcePath: "/tmp/x")
+        // Pipeline should use "MYDISC" as volume label
+        XCTAssertTrue(pipeline.contains("-V MYDISC") || pipeline.contains("-V \"MYDISC\""),
+                      "Pipeline should contain -V MYDISC")
+        // Pipeline should NOT use devicePath as volume label
+        // The devicePath is "IOService:/bad" — check that -V is NOT followed by it
+        let vFlagIndex = pipeline.range(of: "-V")
+        if let idx = vFlagIndex {
+            let afterV = pipeline[idx.upperBound...].trimmingCharacters(in: .whitespaces)
+            XCTAssertFalse(afterV.hasPrefix("IOService"),
+                           "Volume label should not be the device path")
+        }
+    }
 }

@@ -82,6 +82,8 @@ public struct BurnConfiguration {
     public var ejectAfterBurn: Bool
     public var bufferSize: Int      // Buffer size in KB
     public var timeout: TimeInterval
+    /// Optional custom volume label for data discs (max 32 chars, used if set)
+    public var volumeLabel: String?
     
     /// Creates a safe default configuration for USB-connected drives
     public static func safeUSB(device: OpticalDrive? = nil,
@@ -97,7 +99,8 @@ public struct BurnConfiguration {
             simulate: false,
             ejectAfterBurn: false,
             bufferSize: 4096,   // 4 MB buffer
-            timeout: 600        // 10 minutes max
+            timeout: 600,       // 10 minutes max
+            volumeLabel: nil
         )
     }
 }
@@ -717,7 +720,8 @@ public class BurnEngine {
     /// Generate a full data burn pipeline (mkisofs + cdrecord or growisofs).
     public func generateDataBurnPipeline(config: BurnConfiguration, isoPath: String) throws -> String {
         // First generate ISO, then burn it
-        return "\(ISOBuilder.mkisofsBinaryPath) -R -J -V \"\(config.devicePath)\" -o \(isoPath) \(isoPath) && \(try generateDataBurnCommand(config: config, isoPath: isoPath))"
+        let volumeLabel = config.volumeLabel ?? "SPALAM_DATA"
+        return "\(ISOBuilder.mkisofsBinaryPath) -R -J -V \"\(volumeLabel)\" -o \(isoPath) \(isoPath) && \(try generateDataBurnCommand(config: config, isoPath: isoPath))"
     }
     
     /// Generate a data burn pipeline from a source path (directory) directly to disc.
@@ -728,11 +732,124 @@ public class BurnEngine {
             return "\(growisofsPath) -\(config.simulate ? "dry-run" : "Z") \(config.devicePath) -R -J \(sourcePath)"
         }
         // Fallback: mkisofs + cdrecord
+        let volumeLabel = config.volumeLabel ?? "SPALAM_DATA"
         let tempISO = "/tmp/spalam_data_\(UUID().uuidString).iso"
         let mkisofsPath = ISOBuilder.mkisofsBinaryPath
-        let mkisofsCmd = "\(mkisofsPath) -R -J -V \"\(config.devicePath)\" -o \(tempISO) \(sourcePath)"
+        let mkisofsCmd = "\(mkisofsPath) -R -J -V \"\(volumeLabel)\" -o \(tempISO) \(sourcePath)"
         let burnCmd = try generateDataBurnCommand(config: config, isoPath: tempISO)
         return "\(mkisofsCmd) && \(burnCmd) && rm -f \(tempISO)"
+    }
+    
+    // MARK: - Data Disc Execution
+    
+    /// Execute a data burn pipeline (mkisofs + cdrecord or growisofs) for a source directory.
+    /// - Parameters:
+    ///   - config: Burn configuration
+    ///   - sourcePath: Path to the source directory to burn
+    ///   - progress: Optional progress callback
+    /// - Returns: true if successful
+    /// - Throws: BurnError if the burn fails or source is missing
+    public func burnData(config: BurnConfiguration, sourcePath: String, progress: BurnProgressCallback?) throws -> Bool {
+        progress?(.initializing)
+        
+        // Verify source exists
+        guard FileManager.default.fileExists(atPath: sourcePath) else {
+            throw BurnError.processError("Source path does not exist: \(sourcePath)")
+        }
+        
+        // Get the pipeline
+        let pipeline = try generateDataBurnPipeline(config: config, sourcePath: sourcePath)
+        
+        // Run via runWithTimeout using /bin/bash -c
+        return try runWithTimeout(timeout: config.timeout) { box in
+            let process = Process()
+            box.process = process
+            process.executableURL = URL(fileURLWithPath: "/bin/bash")
+            process.arguments = ["-c", pipeline]
+            
+            let outputPipe = Pipe()
+            let errorPipe = Pipe()
+            process.standardOutput = outputPipe
+            process.standardError = errorPipe
+            
+            try process.run()
+            
+            let fileHandle = outputPipe.fileHandleForReading
+            let errorHandle = errorPipe.fileHandleForReading
+            
+            let group = DispatchGroup()
+            
+            group.enter()
+            var outputData = Data()
+            DispatchQueue.global(qos: .userInitiated).async {
+                outputData = fileHandle.readDataToEndOfFile()
+                group.leave()
+            }
+            
+            group.enter()
+            var errorData = Data()
+            DispatchQueue.global(qos: .userInitiated).async {
+                errorData = errorHandle.readDataToEndOfFile()
+                group.leave()
+            }
+            
+            process.waitUntilExit()
+            group.wait()
+            
+            let output = String(data: outputData, encoding: .utf8) ?? ""
+            let errorOutput = String(data: errorData, encoding: .utf8) ?? ""
+            
+            // Parse progress from combined output
+            self.parseDataBurnProgress(output + "\n" + errorOutput, progress: progress)
+            
+            if process.terminationStatus != 0 {
+                let errorMsg = BurnError.burnFailed("Data burn failed: \(errorOutput.trimmingCharacters(in: .whitespacesAndNewlines))")
+                progress?(.error(errorMsg))
+                throw errorMsg
+            }
+            
+            progress?(.completed)
+            return true
+        }
+    }
+    
+    /// Parses data burn pipeline output for progress information.
+    /// Handles cdrecord-style ("Track 01: 45% done") and growisofs-style ("[RO] 45%") output.
+    private func parseDataBurnProgress(_ output: String, progress: BurnProgressCallback?) {
+        let lines = output.components(separatedBy: .newlines)
+        
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { continue }
+            
+            // cdrecord: "Track 01: 45% done" or "Track 01: 45.0% done"
+            if trimmed.contains("Track") && trimmed.contains("%") && trimmed.contains("done") {
+                if let percentRange = trimmed.range(of: "[0-9.]+%", options: .regularExpression) {
+                    let percentStr = trimmed[percentRange].replacingOccurrences(of: "%", with: "")
+                    if let percent = Double(percentStr) {
+                        progress?(.writingTrack(track: 1, total: 1, progress: percent / 100.0))
+                    }
+                }
+            }
+            // growisofs: "[RO] 45%" or "  45.0%"
+            else if trimmed.contains("[RO") && trimmed.contains("%") {
+                if let percentRange = trimmed.range(of: "[0-9.]+%", options: .regularExpression) {
+                    let percentStr = trimmed[percentRange].replacingOccurrences(of: "%", with: "")
+                    if let percent = Double(percentStr) {
+                        progress?(.writingTrack(track: 1, total: 1, progress: percent / 100.0))
+                    }
+                }
+            }
+            
+            // Phases
+            if trimmed.contains("Starting to write") || trimmed.contains("Writing lead-in") {
+                progress?(.leadIn)
+            } else if trimmed.contains("lead-out") || trimmed.contains("Lead-out") {
+                progress?(.leadOut)
+            } else if trimmed.contains("Closing") || trimmed.contains("Fixating") {
+                progress?(.closingSession)
+            }
+        }
     }
     
     // MARK: - Private Methods
