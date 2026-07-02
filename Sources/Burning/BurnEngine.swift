@@ -1,7 +1,7 @@
 import Foundation
 
 /// Errors that can occur during CD burning
-public enum BurnError: LocalizedError {
+public enum BurnError: LocalizedError, Sendable {
     case deviceNotFound(String)
     case deviceBusy(String)
     case burnFailed(String)
@@ -43,7 +43,7 @@ public enum BurnError: LocalizedError {
 }
 
 /// Represents a detected optical drive
-public struct OpticalDrive {
+public struct OpticalDrive: Sendable {
     public let name: String
     public let vendor: String
     public let model: String
@@ -63,14 +63,14 @@ public struct OpticalDrive {
 /// Write modes for CD burning
 /// Note: cdrdao always writes in DAO/SAO mode (Disc-At-Once).
 /// TAO (Track-At-Once) is only supported via cdrecord.
-public enum WriteMode: String {
+public enum WriteMode: String, Sendable {
     case sao = "SAO"    // Session-At-Once (disc-at-once, for cdrecord)
     case tao = "TAO"    // Track-At-Once (for cdrecord only)
     case dao = "DAO"    // Disc-At-Once (default for cdrdao)
 }
 
 /// Burn session configuration
-public struct BurnConfiguration {
+public struct BurnConfiguration: Sendable {
     public var device: OpticalDrive?
     /// IOKit registry path for cdrdao (e.g. "IOService:/.../IODVDServices")
     public var devicePath: String
@@ -106,7 +106,7 @@ public struct BurnConfiguration {
 }
 
 /// Status updates during burning
-public enum BurnProgress {
+public enum BurnProgress: Sendable {
     case initializing
     case writingTrack(track: Int, total: Int, progress: Double) // progress 0.0-1.0
     case verifying(progress: Double)
@@ -126,7 +126,7 @@ final class ProcessBox {
 }
 
 /// Main engine for CD burning via cdrdao
-public class BurnEngine {
+public class BurnEngine: DataBurner, @unchecked Sendable {
     private let cdrdaoPath: String
     private let cdrecordPath: String
     
