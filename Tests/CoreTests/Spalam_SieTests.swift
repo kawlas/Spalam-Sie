@@ -742,4 +742,48 @@ final class Spalam_SieTests: XCTestCase {
         Thread.sleep(forTimeInterval: 0.1)
         XCTAssertFalse(capturedProc.isRunning, "Process should be terminated after timeout")
     }
+    
+    // MARK: - CancelBurn Tests (Bug B5)
+    
+    func testBurnEngineCancelTerminatesProcess() throws {
+        guard FileManager.default.isExecutableFile(atPath: "/bin/sleep") else {
+            throw XCTSkip("sleep missing")
+        }
+        let engine = BurnEngine()
+        let exp = expectation(description: "terminated")
+        // Use a class wrapper to avoid Swift 6 mutable capture in @Sendable closure
+        final class ProcRef { var proc: Process? }
+        let pref = ProcRef()
+        DispatchQueue.global(qos: .userInitiated).async {
+            _ = try? engine.runWithTimeout(timeout: 30) { box in
+                let p = Process()
+                p.executableURL = URL(fileURLWithPath: "/bin/sleep")
+                p.arguments = ["60"]
+                box.process = p
+                pref.proc = p
+                try p.run()
+                p.waitUntilExit()
+                return true
+            }
+            exp.fulfill()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            engine.cancel()
+        }
+        wait(for: [exp], timeout: 5.0)
+        // after runWithTimeout returns (because process was terminated), the process should not be running
+        XCTAssertFalse(pref.proc?.isRunning ?? true, "process should be terminated after cancel")
+    }
+    
+    @MainActor
+    func testBurnSessionCancelBurnSetsErrorState() throws {
+        let session = BurnSession()
+        session.state = .burning(progress: 0.1, currentTrack: 1, totalTracks: 2)
+        session.cancelBurn()
+        if case .error(let msg) = session.state {
+            XCTAssertEqual(msg, "Burn cancelled by user")
+        } else {
+            XCTFail("Expected .error state, got \(session.state)")
+        }
+    }
 }

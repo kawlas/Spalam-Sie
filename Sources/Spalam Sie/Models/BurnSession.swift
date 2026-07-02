@@ -225,11 +225,11 @@ public class BurnSession: ObservableObject {
         }
     }
     
-    /// Cancels the current burn operation
+    /// Cancels the current burn operation by terminating the underlying process
     public func cancelBurn() {
-        // Currently running Process-based, so we can't easily cancel
-        // In a full implementation, we'd track the process and kill it
-        appendLog("Cancel requested (not yet implemented for running burns)")
+        appendLog("🛑 Cancel requested — terminating burn process...")
+        burnEngine.cancel()
+        state = .error("Burn cancelled by user")
     }
     
     /// Refreshes device detection

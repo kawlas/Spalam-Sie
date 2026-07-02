@@ -127,6 +127,11 @@ public class BurnEngine {
     private let cdrdaoPath: String
     private let cdrecordPath: String
     
+    /// Holds the currently active process (if any) so cancel can terminate it.
+    /// `nonisolated(unsafe)` because BurnEngine is a plain class accessed from
+    /// both the main thread (cancel) and background queue (runWithTimeout).
+    private nonisolated(unsafe) var activeProcessBox: ProcessBox?
+    
     public init(cdrdaoPath: String = "/opt/homebrew/bin/cdrdao",
                 cdrecordPath: String = "/opt/homebrew/bin/cdrecord") {
         self.cdrdaoPath = cdrdaoPath
@@ -852,6 +857,8 @@ public class BurnEngine {
     /// The block receives a ProcessBox that should have its `process` set so termination works.
     internal func runWithTimeout<T>(timeout: TimeInterval, block: @escaping (ProcessBox) throws -> T) throws -> T {
         let box = ProcessBox()
+        self.activeProcessBox = box
+        defer { self.activeProcessBox = nil }
         let semaphore = DispatchSemaphore(value: 0)
         var resultBox: Result<T, Error>?
         DispatchQueue.global(qos: .userInitiated).async {
@@ -869,6 +876,12 @@ public class BurnEngine {
         case .failure(let e): throw e
         case .none: throw BurnError.processTimeout("Operation did not complete")
         }
+    }
+    
+    /// Cancels the currently running burn process by terminating it.
+    /// Safe to call even when no process is running (no-op).
+    public func cancel() {
+        activeProcessBox?.process?.terminate()
     }
     
     /// Parses cdrdao output for progress information
