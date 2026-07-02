@@ -246,23 +246,17 @@ struct DataDiscView: View {
     // MARK: - Drop Handling
     
     private func handleDrop(providers: [NSItemProvider]) {
-        for provider in providers {
-            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
-                guard let data = item as? Data,
-                      let url = URL(dataRepresentation: data, relativeTo: nil) else { return }
-                DispatchQueue.main.async {
-                    do {
-                        var isDir: ObjCBool = false
-                        if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) {
-                            if isDir.boolValue {
-                                try session.addFile(url)
-                            } else {
-                                try session.addFile(url)
-                            }
-                        }
-                    } catch {
-                        print("Error adding file: \(error)")
+        let urls = FileDropExtractor.extractURLs(from: providers)
+        guard !urls.isEmpty else { return }
+        DispatchQueue.main.async {
+            for url in urls {
+                do {
+                    var isDir: ObjCBool = false
+                    if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) {
+                        try self.session.addFile(url)
                     }
+                } catch {
+                    print("Error adding file: \(error)")
                 }
             }
         }

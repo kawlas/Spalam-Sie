@@ -824,4 +824,60 @@ final class Spalam_SieTests: XCTestCase {
         let out = try generator.sanitizeForCDTEXT("\0\0\0")
         XCTAssertEqual(out, "")
     }
+    
+    // MARK: - FileDropExtractor Tests (B-burner-dragndrop-TEST)
+    
+    func testParseLoadedItemURL() throws {
+        // NSURL items are passed directly as URL from loadItem
+        let url = URL(fileURLWithPath: "/tmp/test.txt")
+        let result = FileDropExtractor.parseLoadedItem(url)
+        XCTAssertEqual(result, url)
+    }
+    
+    func testParseLoadedItemDataBookmark() throws {
+        // Create a real bookmark data
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        try "hello".write(to: tmp, atomically: true, encoding: .utf8)
+        
+        let bookmarkData = try tmp.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil)
+        let result = FileDropExtractor.parseLoadedItem(bookmarkData)
+        XCTAssertNotNil(result)
+        XCTAssertEqual(result?.lastPathComponent, tmp.lastPathComponent)
+    }
+    
+    func testParseLoadedItemDataPlain() throws {
+        // Plain URL data representation
+        let url = URL(fileURLWithPath: "/tmp/test_plain.txt")
+        let data = url.dataRepresentation
+        let result = FileDropExtractor.parseLoadedItem(data)
+        XCTAssertEqual(result, url)
+    }
+    
+    func testParseLoadedItemString() throws {
+        let result = FileDropExtractor.parseLoadedItem("/tmp/from_string.txt")
+        XCTAssertEqual(result, URL(fileURLWithPath: "/tmp/from_string.txt"))
+    }
+    
+    func testParseLoadedItemNil() throws {
+        let result = FileDropExtractor.parseLoadedItem(nil)
+        XCTAssertNil(result)
+    }
+    
+    func testParseLoadedItemInvalidData() throws {
+        // Random binary data should not crash and should not produce a valid file URL
+        let data = Data([0x00, 0x01, 0x02])
+        let result = FileDropExtractor.parseLoadedItem(data)
+        // URL(dataRepresentation:) may produce some URL from arbitrary bytes, but it
+        // won't be a file URL or pass the fileExists filter later — no crash is the key
+        if let url = result {
+            // Ensure it doesn't point to an actual file
+            XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        }
+    }
+    
+    func testFileDropExtractorEmptyProviders() {
+        let urls = FileDropExtractor.extractURLs(from: [])
+        XCTAssertEqual(urls.count, 0)
+    }
 }
