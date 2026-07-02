@@ -13,6 +13,12 @@ struct HelpView: View {
         }
         .frame(width: 580, height: 480)
         .padding()
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            }
+        }
     }
     
     // MARK: - Getting Started
