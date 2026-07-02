@@ -693,4 +693,53 @@ final class Spalam_SieTests: XCTestCase {
     func testOpenTargetForBurner() {
         XCTAssertEqual(openTarget(for: .burner), .burnerTracks)
     }
+    
+    // MARK: - RunWithTimeout Tests (Bug B2)
+    
+    func testRunWithTimeoutFiresOnHang() throws {
+        let engine = BurnEngine()
+        let start = Date()
+        XCTAssertThrowsError(try engine.runWithTimeout(timeout: 0.2) { box in
+            Thread.sleep(forTimeInterval: 5)
+            return true
+        })
+        let elapsed = Date().timeIntervalSince(start)
+        XCTAssertLessThan(elapsed, 2, "Should timeout in ~0.2s, not sleep 5s")
+    }
+    
+    func testRunWithTimeoutReturnsOnSuccess() throws {
+        let engine = BurnEngine()
+        let result = try engine.runWithTimeout(timeout: 5) { box in
+            return 42
+        }
+        XCTAssertEqual(result, 42)
+    }
+    
+    func testRunWithTimeoutPropagatesBlockError() throws {
+        let engine = BurnEngine()
+        XCTAssertThrowsError(try engine.runWithTimeout(timeout: 5) { box in
+            throw BurnError.processTimeout("inner")
+        })
+    }
+    
+    func testRunWithTimeoutTerminatesProcess() throws {
+        guard FileManager.default.isExecutableFile(atPath: "/bin/sleep") else {
+            throw XCTSkip("/bin/sleep not found")
+        }
+        let engine = BurnEngine()
+        var capturedProc: Process!
+        XCTAssertThrowsError(try engine.runWithTimeout(timeout: 0.3) { box in
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/bin/sleep")
+            proc.arguments = ["30"]
+            box.process = proc
+            try proc.run()
+            capturedProc = proc
+            Thread.sleep(forTimeInterval: 10)
+            return true
+        })
+        // Give termination a moment to take effect
+        Thread.sleep(forTimeInterval: 0.1)
+        XCTAssertFalse(capturedProc.isRunning, "Process should be terminated after timeout")
+    }
 }

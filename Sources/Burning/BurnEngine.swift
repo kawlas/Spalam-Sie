@@ -12,6 +12,7 @@ public enum BurnError: LocalizedError {
     case verificationFailed(String)
     case processError(String)
     case timeout
+    case processTimeout(String)
     
     public var errorDescription: String? {
         switch self {
@@ -35,6 +36,8 @@ public enum BurnError: LocalizedError {
             return "Process error: \(details)"
         case .timeout:
             return "Operation timed out"
+        case .processTimeout(let details):
+            return "Operation timed out: \(details)"
         }
     }
 }
@@ -113,6 +116,11 @@ public enum BurnProgress {
 
 /// Callback for burn progress updates
 public typealias BurnProgressCallback = (BurnProgress) -> Void
+
+/// Thread-safe holder for a running Process, enabling external termination
+final class ProcessBox {
+    var process: Process?
+}
 
 /// Main engine for CD burning via cdrdao
 public class BurnEngine {
@@ -728,8 +736,9 @@ public class BurnEngine {
     private func runCdrdao(args: [String],
                           config: BurnConfiguration,
                           progress: BurnProgressCallback?) throws -> Bool {
-        return try runWithTimeout(timeout: config.timeout) {
+        return try runWithTimeout(timeout: config.timeout) { box in
             let process = Process()
+            box.process = process
             process.executableURL = URL(fileURLWithPath: self.cdrdaoPath)
             process.arguments = args
             
@@ -785,8 +794,9 @@ public class BurnEngine {
     private func runCdrecord(args: [String],
                             config: BurnConfiguration,
                             progress: BurnProgressCallback?) throws -> Bool {
-        return try runWithTimeout(timeout: config.timeout) {
+        return try runWithTimeout(timeout: config.timeout) { box in
             let process = Process()
+            box.process = process
             process.executableURL = URL(fileURLWithPath: self.cdrecordPath)
             process.arguments = args
             
@@ -836,12 +846,29 @@ public class BurnEngine {
         }
     }
     
-    /// Runs a block with a timeout guard.
-    /// Note: In Swift 6 strict concurrency, true timeout requires Sendable-safe patterns.
-    /// TODO: Implement non-blocking Process timeout via async/await when macOS 14+ Process API is available.
-    private func runWithTimeout<T>(timeout: TimeInterval, block: () throws -> T) throws -> T {
-        let result = try block()
-        return result
+    /// Runs a block with a timeout guard on a background queue.
+    /// If the block does not complete within `timeout` seconds, the process is terminated
+    /// and a `BurnError.processTimeout` is thrown.
+    /// The block receives a ProcessBox that should have its `process` set so termination works.
+    internal func runWithTimeout<T>(timeout: TimeInterval, block: @escaping (ProcessBox) throws -> T) throws -> T {
+        let box = ProcessBox()
+        let semaphore = DispatchSemaphore(value: 0)
+        var resultBox: Result<T, Error>?
+        DispatchQueue.global(qos: .userInitiated).async {
+            do { resultBox = .success(try block(box)) }
+            catch { resultBox = .failure(error) }
+            semaphore.signal()
+        }
+        let waited = semaphore.wait(timeout: .now() + timeout)
+        if waited == .timedOut {
+            box.process?.terminate()
+            throw BurnError.processTimeout("Operation timed out after \(Int(timeout))s")
+        }
+        switch resultBox {
+        case .success(let v): return v
+        case .failure(let e): throw e
+        case .none: throw BurnError.processTimeout("Operation did not complete")
+        }
     }
     
     /// Parses cdrdao output for progress information
