@@ -51,14 +51,22 @@ public enum PlayerState: Equatable {
     
     // MARK: - Playback Control
     
-    /// Play a single audio file immediately.
+    /// Play a single audio file immediately (replaces queue).
     public func play(url: URL) throws {
         state = .loading
         queue = [url]
         currentIndex = 0
         currentURL = url
         loadMetadata(for: url)
-        
+        try player.play(url)
+        state = .playing
+    }
+    
+    /// Play a URL without resetting the queue — used internally by playAt.
+    private func playURL(_ url: URL) throws {
+        state = .loading
+        currentURL = url
+        loadMetadata(for: url)
         try player.play(url)
         state = .playing
     }
@@ -125,12 +133,11 @@ public enum PlayerState: Equatable {
         }
     }
     
-    /// Play a specific index from the queue.
+    /// Play a specific index from the queue without resetting it.
     public func playAt(index: Int) throws {
         guard index >= 0, index < queue.count else { return }
-        let url = queue[index]
         currentIndex = index
-        try play(url: url)
+        try playURL(queue[index])
     }
     
     /// Skip to next track.
@@ -176,6 +183,11 @@ public enum PlayerState: Equatable {
         }
         queueCount = queue.count
         try playAt(index: 0)
+    }
+    
+    /// Report an error from the UI layer (e.g. file access failure).
+    public func reportError(_ message: String) {
+        state = .error(message)
     }
     
     /// Whether the engine is running.

@@ -88,42 +88,7 @@ struct ContentView: View {
     // MARK: - Player Content
     
     private var playerContent: some View {
-        VStack {
-            if session.tracks.isEmpty {
-                // Empty state — show album grid placeholder
-                VStack(spacing: 16) {
-                    Spacer()
-                    Image(systemName: "music.note.house")
-                        .font(.system(size: 64))
-                        .foregroundColor(.secondary)
-                    Text("Twoja biblioteka muzyczna")
-                        .font(.title2)
-                    Text("Dodaj foldery z muzyką aby rozpocząć")
-                        .foregroundColor(.secondary)
-                    Button("Dodaj folder") {
-                        showFilePicker = true
-                    }
-                    .buttonStyle(.borderedProminent)
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                // Tracks from burner session — quick preview
-                TrackListView()
-                    .environmentObject(session)
-            }
-        }
-        .fileImporter(
-            isPresented: $showFilePicker,
-            allowedContentTypes: [.folder, .audio, .wav,
-                                 .init(filenameExtension: "flac") ?? .data,
-                                 .init(filenameExtension: "mp3") ?? .data],
-            allowsMultipleSelection: true
-        ) { result in
-            if case .success(let urls) = result {
-                session.addFiles(urls)
-            }
-        }
+        PlayerView()
     }
     
     // MARK: - Burner Content
@@ -178,58 +143,7 @@ struct ContentView: View {
     }
     
     private var playerRightPanel: some View {
-        VStack(spacing: 0) {
-            // Now playing (placeholder)
-            VStack(spacing: 12) {
-                Image(systemName: "waveform")
-                    .font(.system(size: 36))
-                    .foregroundColor(.secondary)
-                Text("Odtwarzacz")
-                    .font(.headline)
-                Text("Wybierz utwór z biblioteki")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            .padding()
-            
-            Divider()
-            
-            // Volume
-            HStack {
-                Image(systemName: "speaker.fill")
-                    .foregroundColor(.secondary)
-                Slider(value: .constant(0.7), in: 0...1)
-                Image(systemName: "speaker.wave.3.fill")
-                    .foregroundColor(.secondary)
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
-            
-            Divider()
-            
-            // Queue / playlist
-            VStack(alignment: .leading) {
-                Text("Kolejka")
-                    .font(.headline)
-                    .padding(.horizontal)
-                if session.tracks.isEmpty {
-                    Text("Brak utworów")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal)
-                } else {
-                    List(Array(session.tracks.enumerated()), id: \.offset) { _, track in
-                        Text(track.title)
-                            .font(.caption)
-                    }
-                    .listStyle(.plain)
-                }
-            }
-            .padding(.vertical, 8)
-            
-            Spacer()
-        }
-        .background(Color(NSColor.controlBackgroundColor))
+        EmptyView()
     }
     
     private var burnerRightPanel: some View {

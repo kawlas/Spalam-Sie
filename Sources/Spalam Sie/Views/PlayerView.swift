@@ -38,7 +38,7 @@ struct PlayerView: View {
         }
         .fileImporter(
             isPresented: $showFilePicker,
-            allowedContentTypes: [.audio, .wav, .mp3, .mpeg4Audio, .aiff, UTType(filenameExtension: "flac") ?? .audio],
+            allowedContentTypes: Self.supportedAudioTypes,
             allowsMultipleSelection: true,
             onCompletion: handleFileImport
         )
@@ -274,21 +274,39 @@ struct PlayerView: View {
     }
     
     private func handleFileImport(_ result: Result<[URL], Error>) {
-        guard case .success(let urls) = result else { return }
+        guard case .success(let urls) = result else {
+            if case .failure(let error) = result {
+                print("❌ File import failed: \(error.localizedDescription)")
+            }
+            return
+        }
         let audioURLs = urls.filter { isAudioFile($0) }
-        guard !audioURLs.isEmpty else { return }
+        guard !audioURLs.isEmpty else {
+            print("⚠️ No supported audio files selected")
+            return
+        }
         
         // Access security-scoped resources
         for url in audioURLs {
-            guard url.startAccessingSecurityScopedResource() else { continue }
+            guard url.startAccessingSecurityScopedResource() else {
+                print("⚠️ Could not access: \(url.lastPathComponent)")
+                continue
+            }
         }
         
-        if player.queueCount == 0 {
-            try? player.playQueue(urls: audioURLs)
-        } else {
-            for url in audioURLs {
-                try? player.queue(url: url)
+        do {
+            if player.queueCount == 0 {
+                try player.playQueue(urls: audioURLs)
+                print("▶️ Playing \(audioURLs.count) file(s)")
+            } else {
+                for url in audioURLs {
+                    try player.queue(url: url)
+                }
+                print("➕ Queued \(audioURLs.count) file(s)")
             }
+        } catch {
+            print("❌ Playback error: \(error.localizedDescription)")
+            player.reportError(error.localizedDescription)
         }
     }
     
@@ -355,6 +373,41 @@ struct PlayerView: View {
             endPoint: .bottomTrailing
         )
     }
+    
+    /// All supported audio file UTTypes for the file importer.
+    private static let supportedAudioTypes: [UTType] = {
+        var types: [UTType] = [
+            .wav, .mp3, .mpeg4Audio, .aiff,
+            .audio
+        ]
+        // FLAC – create from extension since it may not be in the system database
+        if let flac = UTType(tag: "flac", tagClass: .filenameExtension, conformingTo: .audio) {
+            types.append(flac)
+        }
+        // OGG / Opus
+        if let ogg = UTType(tag: "ogg", tagClass: .filenameExtension, conformingTo: .audio) {
+            types.append(ogg)
+        }
+        if let opus = UTType(tag: "opus", tagClass: .filenameExtension, conformingTo: .audio) {
+            types.append(opus)
+        }
+        // APE
+        if let ape = UTType(tag: "ape", tagClass: .filenameExtension, conformingTo: .audio) {
+            types.append(ape)
+        }
+        // WavPack
+        if let wv = UTType(tag: "wv", tagClass: .filenameExtension, conformingTo: .audio) {
+            types.append(wv)
+        }
+        // DSD
+        if let dsf = UTType(tag: "dsf", tagClass: .filenameExtension, conformingTo: .audio) {
+            types.append(dsf)
+        }
+        if let dff = UTType(tag: "dff", tagClass: .filenameExtension, conformingTo: .audio) {
+            types.append(dff)
+        }
+        return types
+    }()
 }
 
 // MARK: - Queue Row
