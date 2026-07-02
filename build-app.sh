@@ -57,12 +57,11 @@ if [ -f "$PROJECT_DIR/Icons/logo  Spalam Sie.png" ]; then
     cp "$PROJECT_DIR/Icons/logo  Spalam Sie.png" "$APP_BUNDLE/Contents/Resources/"
 fi
 
-# 7. Copy SFBAudioEngine binary frameworks (mpg123, opus, FLAC, sndfile, lame)
+# 7. Copy binary frameworks from SPM build directory
 echo "→ Copying binary frameworks..."
 FRAMEWORKS_SOURCE="$BUILD_DIR/arm64-apple-macosx/release"
 FRAMEWORKS_DEST="$APP_BUNDLE/Contents/Frameworks"
 
-# These frameworks are built as dependencies of SFBAudioEngine
 FRAMEWORKS=("mpg123" "opus" "FLAC" "sndfile" "lame")
 
 for fw in "${FRAMEWORKS[@]}"; do
@@ -71,21 +70,8 @@ for fw in "${FRAMEWORKS[@]}"; do
     if [ -d "$FW_SRC" ]; then
         echo "  → Copying $fw.framework"
         cp -R "$FW_SRC" "$FW_DEST"
-        # Fix install_name to use @rpath
-        install_name_tool -id "@rpath/$fw.framework/Versions/A/$fw" "$FW_DEST/Versions/A/$fw" 2>/dev/null || true
     else
-        # Check artifacts directory for xcframework
-        XCFW_SRC=$(find "$BUILD_DIR/artifacts" -name "$fw.xcframework" 2>/dev/null | head -1)
-        if [ -n "$XCFW_SRC" ]; then
-            MACOS_FW=$(find "$XCFW_SRC" -path "*macos-arm64*/$fw.framework" 2>/dev/null | head -1)
-            if [ -n "$MACOS_FW" ] && [ -d "$MACOS_FW" ]; then
-                echo "  → Copying $fw.framework from xcframework"
-                cp -R "$MACOS_FW" "$FW_DEST"
-                install_name_tool -id "@rpath/$fw.framework/Versions/A/$fw" "$FW_DEST/Versions/A/$fw" 2>/dev/null || true
-            fi
-        else
-            echo "  ⚠️  Warning: $fw.framework not found"
-        fi
+        echo "  ⚠️  Warning: $fw.framework not found at $FW_SRC"
     fi
 done
 
@@ -93,18 +79,30 @@ done
 echo "→ Fixing binary rpath..."
 install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_BUNDLE/Contents/MacOS/SpalamSie" 2>/dev/null || true
 
-# 9. Fix framework rpaths
+# 9. Strip extended attributes (resource forks block codesign)
+echo "→ Stripping extended attributes..."
+xattr -cr "$FRAMEWORKS_DEST" 2>/dev/null
+xattr -cr "$APP_BUNDLE/Contents/MacOS/SpalamSie" 2>/dev/null
+
+# 10. Sign frameworks
+echo "→ Signing frameworks..."
 for fw in "${FRAMEWORKS[@]}"; do
-    FW_DEST="$FRAMEWORKS_DEST/$fw.framework/Versions/A/$fw"
-    if [ -f "$FW_DEST" ]; then
-        install_name_tool -add_rpath "@loader_path/../.." "$FW_DEST" 2>/dev/null || true
+    FW_PATH="$FRAMEWORKS_DEST/$fw.framework"
+    if [ -d "$FW_PATH" ]; then
+        codesign --force --sign - "$FW_PATH" 2>/dev/null || echo "  ⚠️  Could not sign $fw.framework"
     fi
 done
 
-# 10. Sign with ad-hoc signature
+# 11. Sign main binary
+echo "→ Signing binary..."
+codesign --force --sign - "$APP_BUNDLE/Contents/MacOS/SpalamSie" 2>&1 || {
+    echo "Warning: binary codesign failed"
+}
+
+# 12. Sign entire bundle
 echo "→ Signing bundle..."
-codesign --force --deep --sign - "$APP_BUNDLE" 2>/dev/null || {
-    echo "Warning: codesign failed (not critical for development)"
+codesign --force --deep --sign - "$APP_BUNDLE" 2>&1 || {
+    echo "Warning: bundle codesign failed (not critical for development)"
 }
 
 echo ""

@@ -14,6 +14,7 @@ struct PlayerView: View {
     
     // Queue display
     @State private var draggedIndex: Int?
+    @State private var isDropTargeted = false
     
     private let timeFormatter: DateComponentsFormatter = {
         let f = DateComponentsFormatter()
@@ -33,8 +34,10 @@ struct PlayerView: View {
                 .frame(minWidth: 400, idealWidth: 500)
         }
         .frame(minHeight: 400)
-        .toolbar {
-            toolbarContent
+        .background(isDropTargeted ? Color.accentColor.opacity(0.05) : Color.clear)
+        .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
+            handleDrop(providers: providers)
+            return true
         }
         .fileImporter(
             isPresented: $showFilePicker,
@@ -88,6 +91,12 @@ struct PlayerView: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
+                    Button("Wybierz pliki audio…") {
+                        showFilePicker = true
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .padding(.top, 8)
                     Spacer()
                 }
                 .frame(maxWidth: .infinity)
@@ -314,6 +323,33 @@ struct PlayerView: View {
         let ext = url.pathExtension.lowercased()
         return ["flac", "wav", "mp3", "aiff", "aif", "m4a", "aac", "ogg", "opus",
                 "wv", "wavpack", "dsf", "dff", "ape", "alac"].contains(ext)
+    }
+    
+    private func handleDrop(providers: [NSItemProvider]) {
+        var urls: [URL] = []
+        let group = DispatchGroup()
+        for provider in providers {
+            group.enter()
+            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                if let data = item as? Data, let url = URL(dataRepresentation: data, relativeTo: nil) {
+                    urls.append(url)
+                } else if let url = item as? URL {
+                    urls.append(url)
+                }
+                group.leave()
+            }
+        }
+        group.notify(queue: .main) { [self] in
+            let audioURLs = urls.filter { isAudioFile($0) }
+            guard !audioURLs.isEmpty else { return }
+            if player.queueCount == 0 {
+                try? player.playQueue(urls: audioURLs)
+            } else {
+                for url in audioURLs {
+                    try? player.queue(url: url)
+                }
+            }
+        }
     }
     
     // MARK: - Time updates
