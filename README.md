@@ -2,6 +2,19 @@
 
 A reliable CD burning application for macOS Apple Silicon that bypasses the problematic DiscRecording framework and uses cdrdao for direct SCSI passthrough.
 
+## 📊 Current Status (2026-07-02)
+
+**Two-mode app:** Player (SFBAudioEngine, gapless, FLAC/ALAC/WAV/MP3/OGG/Opus/APE/DSD) + Burner (Audio CD / Data Disc / Copy Disc / Video DVD).
+
+**Build:** `bash build-app.sh` → `Spalam Sie.app` (codesign ad-hoc, 10 SFBAudioEngine frameworks bundled). **Tests:** 147 / 0 failures / 2 skipped.
+
+**Known open issues (see [docs/STATUS_2026-07-02.md](docs/STATUS_2026-07-02.md) for full report):**
+- 🔴 **Drag&drop from Finder still broken** — drop highlight shows but file vanishes, never reaches list. Unit-tested extractor works but `.onDrop` in view hierarchy doesn't deliver. Priority 1 next session.
+- 🟠 **Player + Burner concurrency UX missing** — no menu/popup info when player plays during burn; can't add more files to player once a track is playing.
+- 🟡 Manual E2E with real CD hardware pending for: cancelBurn, CD-TEXT null fix, Data Disc burn.
+
+**Stabilization done this session:** B1 security-scope leak, B7 ⌘O contextual, B-help sheet trap, B2 runWithTimeout real, B5 cancelBurn real, B-cdtext-null sanitization, B3 volume label, I2 Data Disc burn (a+b+c), FileDropExtractor + tests.
+
 ## 🔥 Overview
 
 Spalam Sie (Polish for "I'm Burning") is a native macOS application designed to reliably burn audio CDs on Apple Silicon Macs, particularly addressing the challenges posed by USB optical drives connected through hubs (like the XD013 multi-function device).
