@@ -39,7 +39,10 @@ let package = Package(
         ),
         .testTarget(
             name: "PlayerTests",
-            dependencies: ["Spalam Sie"],
+            dependencies: [
+                "Spalam Sie",
+                .product(name: "SFBAudioEngine", package: "SFBAudioEngine"),
+            ],
             path: "Tests/PlayerTests"
         ),
         .testTarget(
