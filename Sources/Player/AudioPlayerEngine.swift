@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import Combine
 import SFBAudioEngine
 
@@ -29,12 +30,18 @@ public enum PlayerState: Equatable {
     @Published public private(set) var nowPlayingTitle: String = ""
     @Published public private(set) var nowPlayingArtist: String = ""
     @Published public private(set) var currentURL: URL?
+    @Published public private(set) var currentArtworkData: Data?
+    
+    /// All URLs currently in the queue (exposed for UI display).
+    public var queueURLs: [URL] { queue }
+    
+    /// Index of the currently playing track, or -1 if none.
+    public private(set) var currentIndex: Int = -1
     
     /// Auto-advance to next track when current finishes.
     public var autoAdvance: Bool = true
     
     private var queue: [URL] = []
-    private var currentIndex: Int = -1
     
     override public init() {
         self.player = AudioPlayer()
@@ -148,6 +155,17 @@ public enum PlayerState: Equatable {
         queue.removeAll()
         queueCount = 0
         currentIndex = -1
+        currentArtworkData = nil
+    }
+    
+    /// Reorder the queue by moving items.
+    public func moveQueue(from source: IndexSet, to destination: Int) {
+        queue.move(fromOffsets: source, toOffset: destination)
+        // Re-enqueue all
+        player.clearQueue()
+        for url in queue {
+            try? player.enqueue(url)
+        }
     }
     
     /// Replace queue with new URLs and start playing.
@@ -172,6 +190,7 @@ public enum PlayerState: Equatable {
             nowPlayingTitle = url.lastPathComponent
             nowPlayingArtist = ""
             totalTime = 0
+            currentArtworkData = nil
             return
         }
         nowPlayingTitle = audioFile.metadata.title ?? url.lastPathComponent
@@ -179,6 +198,8 @@ public enum PlayerState: Equatable {
         if let duration = audioFile.properties.duration {
             totalTime = duration
         }
+        // Extract artwork
+        currentArtworkData = audioFile.metadata.attachedPictures.first?.imageData
     }
     
     private func syncPlaybackState() {
