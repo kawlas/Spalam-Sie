@@ -236,6 +236,76 @@ import XCTest
         // After starting engine but before loading track
     }
     
+    // MARK: - Security Scopes
+    
+    func testSecurityScopeStartedOnPlay() throws {
+        // RED: Playing a file starts the security scope for that URL
+        guard FileManager.default.isExecutableFile(atPath: "/opt/homebrew/bin/ffmpeg") else {
+            throw XCTSkip("ffmpeg not found")
+        }
+        let engine = AudioPlayerEngine()
+        let wavURL = tempDir.appendingPathComponent("scope_play.wav")
+        try createTestAudio(at: wavURL, duration: 0.5)
+        try engine.play(url: wavURL)
+        XCTAssertTrue(engine.securityScopedURLs.contains(wavURL))
+        engine.stop()
+    }
+    
+    func testSecurityScopeReleasedOnStop() throws {
+        // RED: Stopping the engine releases all security scopes
+        guard FileManager.default.isExecutableFile(atPath: "/opt/homebrew/bin/ffmpeg") else {
+            throw XCTSkip("ffmpeg not found")
+        }
+        let engine = AudioPlayerEngine()
+        let wavURL = tempDir.appendingPathComponent("scope_stop.wav")
+        try createTestAudio(at: wavURL, duration: 0.5)
+        try engine.play(url: wavURL)
+        XCTAssertFalse(engine.securityScopedURLs.isEmpty)
+        engine.stop()
+        XCTAssertTrue(engine.securityScopedURLs.isEmpty)
+    }
+    
+    func testSecurityScopeHeldForQueuedTracks() throws {
+        // RED: Security scopes are held for both playing and queued tracks
+        guard FileManager.default.isExecutableFile(atPath: "/opt/homebrew/bin/ffmpeg") else {
+            throw XCTSkip("ffmpeg not found")
+        }
+        let engine = AudioPlayerEngine()
+        let url1 = tempDir.appendingPathComponent("scope_q1.wav")
+        let url2 = tempDir.appendingPathComponent("scope_q2.wav")
+        try createTestAudio(at: url1, duration: 0.3)
+        try createTestAudio(at: url2, duration: 0.3)
+        try engine.play(url: url1)
+        try engine.queue(url: url2)
+        XCTAssertTrue(engine.securityScopedURLs.contains(url1))
+        XCTAssertTrue(engine.securityScopedURLs.contains(url2))
+        engine.stop()
+        XCTAssertTrue(engine.securityScopedURLs.isEmpty)
+    }
+    
+    func testSecurityScopeReleasedOnClearQueue() throws {
+        // RED: Clearing the queue releases all security scopes
+        guard FileManager.default.isExecutableFile(atPath: "/opt/homebrew/bin/ffmpeg") else {
+            throw XCTSkip("ffmpeg not found")
+        }
+        let engine = AudioPlayerEngine()
+        let url1 = tempDir.appendingPathComponent("scope_cq1.wav")
+        let url2 = tempDir.appendingPathComponent("scope_cq2.wav")
+        try createTestAudio(at: url1, duration: 0.3)
+        try createTestAudio(at: url2, duration: 0.3)
+        try engine.playQueue(urls: [url1, url2])
+        engine.clearQueue()
+        XCTAssertTrue(engine.securityScopedURLs.isEmpty)
+    }
+    
+    func testStopAllScopesIdempotent() throws {
+        // RED: Stopping an already-stopped engine does not crash
+        let engine = AudioPlayerEngine()
+        engine.stop()
+        engine.stop()
+        XCTAssertEqual(engine.state, .stopped)
+    }
+    
     // MARK: - Helpers
     
     private func createTestAudio(at url: URL, duration: Double) throws {

@@ -41,11 +41,17 @@ public enum PlayerState: Equatable {
     /// Index of the currently playing track, or -1 if none.
     public private(set) var currentIndex: Int = -1
     
+    /// URLs for which security-scoped access has been started.
+    public var securityScopedURLs: [URL] { Array(scopedURLs) }
+    
     /// Auto-advance to next track when current finishes.
     public var autoAdvance: Bool = true
     
     /// Private backing array — source of truth for the queue.
     private var queue: [URL] = []
+    
+    /// Security-scoped URLs that are currently being accessed.
+    private var scopedURLs: Set<URL> = []
     
     override public init() {
         self.player = AudioPlayer()
@@ -70,6 +76,7 @@ public enum PlayerState: Equatable {
     /// Stop playback and purge the queue.
     public func stop() {
         player.stop()
+        stopAllScopes()
         queue.removeAll()
         currentIndex = -1
         queueCount = 0
@@ -110,6 +117,7 @@ public enum PlayerState: Equatable {
     /// Append one URL to the tail of the queue.
     /// Does NOT call `player.enqueue()` — manual queue only.
     public func queue(url: URL) throws {
+        startScope(for: url)
         queue.append(url)
         syncQueueCount()
     }
@@ -149,6 +157,7 @@ public enum PlayerState: Equatable {
     
     /// Empty the queue.  Does NOT stop currently playing audio.
     public func clearQueue() {
+        stopAllScopes()
         queue.removeAll()
         currentIndex = -1
         syncQueueCount()
@@ -201,6 +210,7 @@ public enum PlayerState: Equatable {
             return
         }
         let url = queue[currentIndex]
+        startScope(for: url)
         state = .loading
         currentURL = url
         loadMetadata(for: url)
@@ -244,6 +254,22 @@ public enum PlayerState: Equatable {
         nowPlayingArtist = ""
         currentURL = nil
         currentArtworkData = nil
+    }
+    
+    /// Start security-scoped access for the given URL.
+    /// Does nothing if the URL is already being accessed.
+    private func startScope(for url: URL) {
+        guard !scopedURLs.contains(url) else { return }
+        _ = url.startAccessingSecurityScopedResource()
+        scopedURLs.insert(url)
+    }
+    
+    /// Stop security-scoped access for all tracked URLs.
+    private func stopAllScopes() {
+        for url in scopedURLs {
+            url.stopAccessingSecurityScopedResource()
+        }
+        scopedURLs.removeAll()
     }
 }
 

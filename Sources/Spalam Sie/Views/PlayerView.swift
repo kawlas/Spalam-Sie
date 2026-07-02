@@ -295,14 +295,6 @@ struct PlayerView: View {
             return
         }
         
-        // Access security-scoped resources
-        for url in audioURLs {
-            guard url.startAccessingSecurityScopedResource() else {
-                print("⚠️ Could not access: \(url.lastPathComponent)")
-                continue
-            }
-        }
-        
         do {
             if player.queueCount == 0 {
                 try player.playQueue(urls: audioURLs)
