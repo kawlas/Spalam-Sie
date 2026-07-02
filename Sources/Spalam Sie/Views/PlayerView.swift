@@ -326,6 +326,8 @@ struct PlayerView: View {
         let audioURLs = urls.filter { isAudioFile($0) }
         guard !audioURLs.isEmpty else { return }
         DispatchQueue.main.async { [self] in
+            // Start security scope so the player can read the files
+            for url in audioURLs { _ = url.startAccessingSecurityScopedResource() }
             if player.queueCount == 0 {
                 try? player.playQueue(urls: audioURLs)
             } else {

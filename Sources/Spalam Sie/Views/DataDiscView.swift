@@ -249,6 +249,8 @@ struct DataDiscView: View {
         let urls = FileDropExtractor.extractURLs(from: providers)
         guard !urls.isEmpty else { return }
         DispatchQueue.main.async {
+            // Start security scope so addFile can read the files
+            for url in urls { _ = url.startAccessingSecurityScopedResource() }
             for url in urls {
                 do {
                     var isDir: ObjCBool = false

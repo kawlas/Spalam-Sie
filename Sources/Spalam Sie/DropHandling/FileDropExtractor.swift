@@ -27,7 +27,9 @@ public enum FileDropExtractor {
     
     /// Synchronously extracts file URLs from the given providers.
     /// Uses loadItem(forTypeIdentifier:) for each provider; blocks until all complete.
-    /// Returns only URLs that point to existing files (filters nonexistent).
+    /// Returns all parsed URLs. Does NOT filter by fileExists — security-scoped URLs
+    /// from Finder can fail fileExists without startAccessingSecurityScopedResource.
+    /// The receiver (view/session) handles security scope and invalid URLs.
     public static func extractURLs(from providers: [NSItemProvider]) -> [URL] {
         // Thread-safe mutable container for concurrent loadItem callbacks
         final class Box: @unchecked Sendable {
@@ -50,7 +52,9 @@ public enum FileDropExtractor {
             }
         }
         _ = group.wait(timeout: .now() + 10)
-        let urls = box.urls.filter { FileManager.default.fileExists(atPath: $0.path) }
-        return urls
+        // Do NOT filter by fileExists — Finder drops yield security-scoped URLs where
+        // fileExists is false without startAccessingSecurityScopedResource. The receiver
+        // (view/session) handles invalid URLs. Filtering here caused dropped files to vanish.
+        return box.urls
     }
 }

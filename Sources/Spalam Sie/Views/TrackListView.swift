@@ -98,7 +98,11 @@ struct TrackListView: View {
     private func handleDrop(providers: [NSItemProvider]) -> Bool {
         let urls = FileDropExtractor.extractURLs(from: providers)
         if !urls.isEmpty {
-            DispatchQueue.main.async { self.session.addFiles(urls) }
+            DispatchQueue.main.async {
+                // Start security scope so addFiles can read the files
+                for url in urls { _ = url.startAccessingSecurityScopedResource() }
+                self.session.addFiles(urls)
+            }
         }
         return true
     }
