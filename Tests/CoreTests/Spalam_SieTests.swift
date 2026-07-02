@@ -786,4 +786,42 @@ final class Spalam_SieTests: XCTestCase {
             XCTFail("Expected .error state, got \(session.state)")
         }
     }
+    
+    // MARK: - CD-TEXT Null Sanitization Tests (Bug B-cdtext-null)
+    
+    func testSanitizeStripsNullChar() throws {
+        let generator = CDTEXTGenerator()
+        let out = try generator.sanitizeForCDTEXT("Hello\0World")
+        XCTAssertEqual(out, "HelloWorld")
+    }
+    
+    func testSanitizeStripsAllControlChars() throws {
+        let generator = CDTEXTGenerator()
+        let out = try generator.sanitizeForCDTEXT("A\u{0001}B\u{0007}C\u{001F}D\u{007F}E")
+        XCTAssertEqual(out, "ABCDE")
+    }
+    
+    func testSanitizeKeepsPrintableASCII() throws {
+        let generator = CDTEXTGenerator()
+        let out = try generator.sanitizeForCDTEXT("Hello World 123!@#")
+        XCTAssertEqual(out, "Hello World 123!@#")
+    }
+    
+    func testSanitizeKeepsPolishTransliteration() throws {
+        let generator = CDTEXTGenerator()
+        let out = try generator.sanitizeForCDTEXT("Żółw")
+        XCTAssertEqual(out, "Zolw")
+    }
+    
+    func testSanitizeEmptyStringReturnsEmpty() throws {
+        let generator = CDTEXTGenerator()
+        let out = try generator.sanitizeForCDTEXT("")
+        XCTAssertEqual(out, "")
+    }
+    
+    func testSanitizeOnlyNullReturnsEmpty() throws {
+        let generator = CDTEXTGenerator()
+        let out = try generator.sanitizeForCDTEXT("\0\0\0")
+        XCTAssertEqual(out, "")
+    }
 }

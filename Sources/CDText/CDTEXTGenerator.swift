@@ -77,8 +77,12 @@ public class CDTEXTGenerator {
     public func sanitizeForCDTEXT(_ input: String) throws -> String {
         var sanitized = ""
         for char in input {
-            if char.isASCII {
+            if let ascii = char.asciiValue, ascii >= 0x20 && ascii <= 0x7E {
+                // printable ASCII — accept
                 sanitized.append(char)
+            } else if char.isASCII {
+                // ASCII but control char (0x00-0x1F or 0x7F) — silently drop
+                continue
             } else {
                 // Try to transliterate common Unicode characters
                 switch char {
