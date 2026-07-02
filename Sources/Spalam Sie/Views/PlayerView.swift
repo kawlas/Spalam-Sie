@@ -328,17 +328,46 @@ struct PlayerView: View {
     private func handleDrop(providers: [NSItemProvider]) {
         var urls: [URL] = []
         let group = DispatchGroup()
+        
         for provider in providers {
             group.enter()
+            // macOS delivers dropped file URLs in multiple possible formats.
+            // We try each strategy until one succeeds.
             provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
-                if let data = item as? Data, let url = URL(dataRepresentation: data, relativeTo: nil) {
+                defer { group.leave() }
+                
+                if let url = item as? URL {
                     urls.append(url)
-                } else if let url = item as? URL {
-                    urls.append(url)
+                    return
                 }
-                group.leave()
+                
+                if let data = item as? Data {
+                    // The Data might be an NSURL bookmark or encoded URL data
+                    var isStale = false
+                    if let bookmarkURL = try? URL(
+                        resolvingBookmarkData: data,
+                        options: .withoutUI,
+                        relativeTo: nil,
+                        bookmarkDataIsStale: &isStale
+                    ) {
+                        urls.append(bookmarkURL)
+                        return
+                    }
+                    // Try as plain URL data
+                    if let plainURL = URL(dataRepresentation: data, relativeTo: nil) {
+                        urls.append(plainURL)
+                        return
+                    }
+                }
+                
+                // Last resort: interpret as file path string
+                if let path = item as? String {
+                    let fileURL = URL(fileURLWithPath: path)
+                    urls.append(fileURL)
+                }
             }
         }
+        
         group.notify(queue: .main) { [self] in
             let audioURLs = urls.filter { isAudioFile($0) }
             guard !audioURLs.isEmpty else { return }
@@ -349,6 +378,7 @@ struct PlayerView: View {
                     try? player.queue(url: url)
                 }
             }
+
         }
     }
     

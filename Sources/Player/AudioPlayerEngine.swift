@@ -13,8 +13,11 @@ public enum PlayerState: Equatable {
 }
 
 /// High-quality audio player powered by SFBAudioEngine.
-/// Supports gapless playback, all formats (FLAC, ALAC, WAV, AIFF, MP3, AAC, OGG, Opus, APE, DSD),
-/// and bit-perfect output via CoreAudio HAL exclusive mode.
+///
+/// Queue management is ENTIRELY manual:
+/// - `queue` is the source of truth — never use `player.enqueue()`
+/// - Tracks advance via delegate `audioPlayerEndOfAudio` → `next()` → `playAt()` → `playURL()` → `player.play(url)`
+/// - This avoids double-playback from mixing two queue systems
 @MainActor public class AudioPlayerEngine: NSObject, ObservableObject {
     
     private let player: AudioPlayer
@@ -41,6 +44,7 @@ public enum PlayerState: Equatable {
     /// Auto-advance to next track when current finishes.
     public var autoAdvance: Bool = true
     
+    /// Private backing array — source of truth for the queue.
     private var queue: [URL] = []
     
     override public init() {
@@ -51,41 +55,25 @@ public enum PlayerState: Equatable {
     
     // MARK: - Playback Control
     
-    /// Play a single audio file immediately (replaces queue).
+    /// Play a single file immediately, replacing the queue.
     public func play(url: URL) throws {
         state = .loading
         queue = [url]
         currentIndex = 0
-        currentURL = url
-        loadMetadata(for: url)
-        try player.play(url)
-        state = .playing
+        syncQueueCount()
+        try playCurrent()
     }
     
-    /// Play a URL without resetting the queue — used internally by playAt.
-    private func playURL(_ url: URL) throws {
-        state = .loading
-        currentURL = url
-        loadMetadata(for: url)
-        try player.play(url)
-        state = .playing
-    }
+    /// Start the engine (no-op — AudioPlayer manages its own engine).
+    public func start() throws {}
     
-    /// Start or resume the engine (AudioPlayer manages it internally, but this is needed for API compat).
-    public func start() throws {
-        // AudioPlayer manages engine lifecycle internally
-    }
-    
-    /// Stop playback and clear queue.
+    /// Stop playback and purge the queue.
     public func stop() {
         player.stop()
         queue.removeAll()
         currentIndex = -1
-        currentTime = 0
-        totalTime = 0
-        nowPlayingTitle = ""
-        nowPlayingArtist = ""
-        currentURL = nil
+        queueCount = 0
+        clearNowPlaying()
         state = .stopped
     }
     
@@ -107,82 +95,83 @@ public enum PlayerState: Equatable {
         syncPlaybackState()
     }
     
-    /// Seek to a specific time position.
+    /// Seek to a precise time position.
     public func seek(to time: TimeInterval) {
         player.seek(time: time)
     }
     
-    /// Seek to a fractional position (0.0 - 1.0).
+    /// Seek to a fractional position (0.0 – 1.0).
     public func seek(position: Double) {
         player.seek(position: position)
     }
     
     // MARK: - Queue Management
     
-    /// Queue a track for gapless playback.
+    /// Append one URL to the tail of the queue.
+    /// Does NOT call `player.enqueue()` — manual queue only.
     public func queue(url: URL) throws {
         queue.append(url)
-        queueCount = queue.count
-        try player.enqueue(url)
+        syncQueueCount()
     }
     
-    /// Queue multiple URLs.
+    /// Append multiple URLs to the tail.
     public func queue(urls: [URL]) throws {
-        for url in urls {
-            try queue(url: url)
-        }
+        queue.append(contentsOf: urls)
+        syncQueueCount()
     }
     
-    /// Play a specific index from the queue without resetting it.
+    /// Play the track at `index` without clearing other queued items.
     public func playAt(index: Int) throws {
-        guard index >= 0, index < queue.count else { return }
+        guard queue.indices.contains(index) else { return }
         currentIndex = index
-        try playURL(queue[index])
+        try playCurrent()
     }
     
-    /// Skip to next track.
+    /// Advance to the next track.
+    /// Called by the delegate and UI.
     public func next() throws {
         let nextIndex = currentIndex + 1
-        guard nextIndex < queue.count else {
+        guard queue.indices.contains(nextIndex) else {
             stop()
             return
         }
-        try playAt(index: nextIndex)
+        currentIndex = nextIndex
+        try playCurrent()
     }
     
-    /// Go to previous track.
+    /// Go to the previous track.
     public func previous() throws {
         let prevIndex = max(currentIndex - 1, 0)
-        try playAt(index: prevIndex)
+        guard queue.indices.contains(prevIndex) else { return }
+        currentIndex = prevIndex
+        try playCurrent()
     }
     
-    /// Clear the queue.
+    /// Empty the queue.  Does NOT stop currently playing audio.
     public func clearQueue() {
-        player.clearQueue()
         queue.removeAll()
-        queueCount = 0
         currentIndex = -1
+        syncQueueCount()
         currentArtworkData = nil
     }
     
     /// Reorder the queue by moving items.
     public func moveQueue(from source: IndexSet, to destination: Int) {
         queue.move(fromOffsets: source, toOffset: destination)
-        // Re-enqueue all
-        player.clearQueue()
-        for url in queue {
-            try? player.enqueue(url)
+        // Adjust currentIndex if needed (track moved)
+        if queue.indices.contains(currentIndex) == false {
+            currentIndex = currentIndex >= queue.count ? queue.count - 1 : currentIndex
         }
     }
     
-    /// Replace queue with new URLs and start playing.
+    /// Replace the queue with new URLs and start playing the first one.
     public func playQueue(urls: [URL]) throws {
         clearQueue()
-        for url in urls {
-            queue.append(url)
-        }
-        queueCount = queue.count
-        try playAt(index: 0)
+        queue.append(contentsOf: urls)
+        syncQueueCount()
+        guard !queue.isEmpty else { return }
+        currentIndex = 0
+        try playCurrent()
     }
     
     /// Report an error from the UI layer (e.g. file access failure).
@@ -195,7 +184,29 @@ public enum PlayerState: Equatable {
         player.engineIsRunning
     }
     
+    /// Refresh currentTime from the player (called by timer).
+    public func refreshTime() {
+        if let ct = player.currentTime {
+            currentTime = ct
+        }
+    }
+    
     // MARK: - Private
+    
+    /// Play the track at `queue[currentIndex]` by calling `player.play(_:)`.
+    /// This is the ONLY place where `player.play(_:)` is called for queue advancement.
+    private func playCurrent() throws {
+        guard queue.indices.contains(currentIndex) else {
+            stop()
+            return
+        }
+        let url = queue[currentIndex]
+        state = .loading
+        currentURL = url
+        loadMetadata(for: url)
+        try player.play(url)
+        state = .playing
+    }
     
     private func loadMetadata(for url: URL) {
         guard let audioFile = try? AudioFile(readingPropertiesAndMetadataFrom: url) else {
@@ -210,7 +221,6 @@ public enum PlayerState: Equatable {
         if let duration = audioFile.properties.duration {
             totalTime = duration
         }
-        // Extract artwork
         currentArtworkData = audioFile.metadata.attachedPictures.first?.imageData
     }
     
@@ -223,25 +233,26 @@ public enum PlayerState: Equatable {
         }
     }
     
-    /// Update current time from player, called periodically.
-    public func refreshTime() {
-        if let ct = player.currentTime {
-            currentTime = ct
-        }
-        if player.isPlaying {
-            // Schedule next refresh
-        }
+    private func syncQueueCount() {
+        queueCount = queue.count
+    }
+    
+    private func clearNowPlaying() {
+        currentTime = 0
+        totalTime = 0
+        nowPlayingTitle = ""
+        nowPlayingArtist = ""
+        currentURL = nil
+        currentArtworkData = nil
     }
 }
 
 /// Player-specific errors.
 public enum PlayerError: LocalizedError {
-    case enqueueFailed
     case playbackFailed(String)
     
     public var errorDescription: String? {
         switch self {
-        case .enqueueFailed: return "Could not enqueue track"
         case .playbackFailed(let details): return "Playback failed: \(details)"
         }
     }
@@ -251,34 +262,34 @@ public enum PlayerError: LocalizedError {
 
 extension AudioPlayerEngine: AudioPlayer.Delegate {
     
-    nonisolated public func audioPlayer(_ audioPlayer: AudioPlayer, playbackStateChanged newState: AudioPlayer.PlaybackState) {
+    nonisolated public func audioPlayer(_ audioPlayer: AudioPlayer,
+                                         playbackStateChanged newState: AudioPlayer.PlaybackState) {
         Task { @MainActor in
             switch newState {
-            case .playing:
-                self.state = .playing
-            case .paused:
-                self.state = .paused
-            case .stopped:
-                self.state = .stopped
-            @unknown default:
-                break
+            case .playing: self.state = .playing
+            case .paused:  self.state = .paused
+            case .stopped: self.state = .stopped
+            @unknown default: break
             }
         }
     }
     
+    /// Called when the player has no more audio to play.
+    /// We advance to the next manually-managed queue item.
     nonisolated public func audioPlayerEndOfAudio(_ audioPlayer: AudioPlayer) {
         Task { @MainActor in
-            if self.autoAdvance {
-                try? self.next()
-            }
+            guard self.autoAdvance else { return }
+            try? self.next()
         }
     }
     
-    nonisolated public func audioPlayer(_ audioPlayer: AudioPlayer, nowPlayingChanged nowPlaying: (any PCMDecoding)?) {
-        // A new track started playing — metadata was already loaded by play(url:)
+    nonisolated public func audioPlayer(_ audioPlayer: AudioPlayer,
+                                         nowPlayingChanged nowPlaying: (any PCMDecoding)?) {
+        // Metadata was already loaded in playCurrent() / loadMetadata(for:)
     }
     
-    nonisolated public func audioPlayer(_ audioPlayer: AudioPlayer, encounteredError error: Error) {
+    nonisolated public func audioPlayer(_ audioPlayer: AudioPlayer,
+                                         encounteredError error: Error) {
         Task { @MainActor in
             self.state = .error(error.localizedDescription)
         }
