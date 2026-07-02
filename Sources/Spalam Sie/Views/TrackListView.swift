@@ -1,8 +1,10 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct TrackListView: View {
     @EnvironmentObject var session: BurnSession
     @State private var selectedTracks = Set<UUID>()
+    @State private var isDropTargeted = false
     
     var body: some View {
         VStack(spacing: 0) {
@@ -58,6 +60,10 @@ struct TrackListView: View {
             .listStyle(.plain)
             .alternatingRowBackgrounds()
         }
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(isDropTargeted ? Color.accentColor : Color.clear, lineWidth: 2))
+        .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
+            return handleDrop(providers: providers)
+        }
     }
     
     private var selectedTrackIndices: IndexSet {
@@ -85,6 +91,34 @@ struct TrackListView: View {
         
         guard panel.runModal() == .OK else { return }
         session.addFiles(panel.urls)
+    }
+    
+    // MARK: - Drop Handling
+    
+    private func handleDrop(providers: [NSItemProvider]) -> Bool {
+        // Thread-safe mutable container for Swift 6 Sendable capture
+        final class Box: @unchecked Sendable {
+            var urls: [URL] = []
+        }
+        let box = Box()
+        let group = DispatchGroup()
+        for provider in providers {
+            group.enter()
+            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                defer { group.leave() }
+                if let url = item as? URL { box.urls.append(url); return }
+                if let data = item as? Data {
+                    var isStale = false
+                    if let bookmarkURL = try? URL(resolvingBookmarkData: data, options: .withoutUI, relativeTo: nil, bookmarkDataIsStale: &isStale) { box.urls.append(bookmarkURL); return }
+                    if let plainURL = URL(dataRepresentation: data, relativeTo: nil) { box.urls.append(plainURL); return }
+                }
+                if let path = item as? String { box.urls.append(URL(fileURLWithPath: path)) }
+            }
+        }
+        group.notify(queue: .main) {
+            if !box.urls.isEmpty { self.session.addFiles(box.urls) }
+        }
+        return true
     }
 }
 
