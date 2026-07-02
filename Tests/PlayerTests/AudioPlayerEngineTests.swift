@@ -3,7 +3,7 @@ import XCTest
 
 /// TDD tests for AudioPlayerEngine (AVAudioEngine-based player).
 /// Tests define the expected interface BEFORE implementation.
-final class AudioPlayerEngineTests: XCTestCase {
+@MainActor final class AudioPlayerEngineTests: XCTestCase {
     
     var tempDir: URL!
     
@@ -24,20 +24,24 @@ final class AudioPlayerEngineTests: XCTestCase {
         XCTAssertNotNil(engine)
     }
     
-    func testEngineStarts() throws {
-        // RED: Engine starts without error
+    func testEngineRejectsInvalidFile() throws {
+        // RED: Engine should handle missing files gracefully
         let engine = AudioPlayerEngine()
-        try engine.start()
-        XCTAssertTrue(engine.isRunning)
-        engine.stop()
+        let bogusURL = URL(fileURLWithPath: "/nonexistent/file.flac")
+        XCTAssertThrowsError(try engine.play(url: bogusURL))
     }
     
     func testEngineStops() throws {
         // RED: Engine stops cleanly
+        guard FileManager.default.isExecutableFile(atPath: "/opt/homebrew/bin/ffmpeg") else {
+            throw XCTSkip("ffmpeg not found")
+        }
         let engine = AudioPlayerEngine()
-        try engine.start()
+        let wavURL = tempDir.appendingPathComponent("stop_test.wav")
+        try createTestAudio(at: wavURL, duration: 0.5)
+        try engine.play(url: wavURL)
         engine.stop()
-        XCTAssertFalse(engine.isRunning)
+        XCTAssertEqual(engine.state, .stopped)
     }
     
     // MARK: - Playback Control
@@ -189,17 +193,32 @@ final class AudioPlayerEngineTests: XCTestCase {
     
     func testQueueOrder() throws {
         // RED: Queued tracks play in sequence
+        guard FileManager.default.isExecutableFile(atPath: "/opt/homebrew/bin/ffmpeg") else {
+            throw XCTSkip("ffmpeg not found")
+        }
         let engine = AudioPlayerEngine()
-        let queue = ["/tmp/a.wav", "/tmp/b.wav", "/tmp/c.wav"]
-        try queue.forEach { try engine.queue(url: URL(fileURLWithPath: $0)) }
-        XCTAssertEqual(engine.queueCount, 3)
+        let url1 = tempDir.appendingPathComponent("a.wav")
+        let url2 = tempDir.appendingPathComponent("b.wav")
+        try createTestAudio(at: url1, duration: 0.3)
+        try createTestAudio(at: url2, duration: 0.3)
+        try engine.queue(url: url1)
+        try engine.queue(url: url2)
+        XCTAssertEqual(engine.queueCount, 2)
     }
     
     func testClearQueue() throws {
         // RED: Clear queue removes all pending tracks
+        guard FileManager.default.isExecutableFile(atPath: "/opt/homebrew/bin/ffmpeg") else {
+            throw XCTSkip("ffmpeg not found")
+        }
         let engine = AudioPlayerEngine()
-        try engine.queue(url: URL(fileURLWithPath: "/tmp/a.wav"))
-        try engine.queue(url: URL(fileURLWithPath: "/tmp/b.wav"))
+        let url1 = tempDir.appendingPathComponent("clear_a.wav")
+        let url2 = tempDir.appendingPathComponent("clear_b.wav")
+        try createTestAudio(at: url1, duration: 0.3)
+        try createTestAudio(at: url2, duration: 0.3)
+        try engine.queue(url: url1)
+        try engine.queue(url: url2)
+        XCTAssertEqual(engine.queueCount, 2)
         engine.clearQueue()
         XCTAssertEqual(engine.queueCount, 0)
     }

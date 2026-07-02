@@ -2,7 +2,7 @@ import XCTest
 import SFBAudioEngine
 
 /// Verify SFBAudioEngine is properly linked and its key types are accessible.
-final class SFBAudioEngineIntegrationTests: XCTestCase {
+@MainActor final class SFBAudioEngineIntegrationTests: XCTestCase {
     
     func testSFBAudioPlayerTypeExists() {
         // AudioPlayer should be available from the SFBAudioEngine module
