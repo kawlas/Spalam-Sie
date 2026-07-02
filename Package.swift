@@ -8,9 +8,15 @@ let package = Package(
     platforms: [
         .macOS(.v14)
     ],
+    dependencies: [
+        .package(url: "https://github.com/sbooth/SFBAudioEngine", from: "0.9.1"),
+    ],
     targets: [
         .executableTarget(
             name: "Spalam Sie",
+            dependencies: [
+                .product(name: "SFBAudioEngine", package: "SFBAudioEngine"),
+            ],
             path: "Sources",
             resources: [
                 .copy("Spalam Sie/Resources/SpalamSie.icns"),
