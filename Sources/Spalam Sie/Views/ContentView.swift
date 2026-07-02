@@ -1,5 +1,19 @@
 import SwiftUI
 
+/// Target for the ⌘O open-files command, decided by the active tab.
+enum OpenTarget: Equatable {
+    case playerFiles
+    case burnerTracks
+}
+
+/// Pure dispatch logic for ⌘O — testable without SwiftUI.
+func openTarget(for tab: AppTab) -> OpenTarget {
+    switch tab {
+    case .player: return .playerFiles
+    case .burner: return .burnerTracks
+    }
+}
+
 enum AppTab: String, CaseIterable {
     case player = "Player"
     case burner = "Burner"
@@ -26,11 +40,13 @@ enum BurnerSection: String, CaseIterable, Identifiable {
 struct ContentView: View {
     @EnvironmentObject var session: BurnSession
     @EnvironmentObject var configManager: ConfigManager
+    @StateObject private var playerEngine = AudioPlayerEngine()
     
     @State private var selectedTab: AppTab = .player
     @State private var burnerSection: BurnerSection = .audio
     @State private var showHelp = false
     @State private var showFilePicker = false
+    @State private var showPlayerFilePicker = false
     @State private var isDropTargeted = false
     
     var body: some View {
@@ -45,6 +61,9 @@ struct ContentView: View {
                     Text("Spalam Sie")
                         .font(.title3)
                         .fontWeight(.semibold)
+                    Button("Open") { handleOpenCommand() }
+                        .keyboardShortcut("o", modifiers: .command)
+                        .opacity(0)
                     Spacer()
                     deviceStatusBadge
                     ejectButton
@@ -83,12 +102,21 @@ struct ContentView: View {
         .sheet(isPresented: $showHelp) {
             HelpView()
         }
+        .fileImporter(
+            isPresented: $showPlayerFilePicker,
+            allowedContentTypes: PlayerView.supportedAudioTypes,
+            allowsMultipleSelection: true
+        ) { result in
+            if case .success(let urls) = result {
+                playerContentImporter(urls)
+            }
+        }
     }
     
     // MARK: - Player Content
     
     private var playerContent: some View {
-        PlayerView()
+        PlayerView(player: playerEngine)
     }
     
     // MARK: - Burner Content
@@ -218,6 +246,40 @@ struct ContentView: View {
                 }
             }
         }
+    }
+    
+    // MARK: - Open Command
+    
+    private func handleOpenCommand() {
+        switch openTarget(for: selectedTab) {
+        case .playerFiles:
+            showPlayerFilePicker = true
+        case .burnerTracks:
+            showFilePicker = true
+        }
+    }
+    
+    private func playerContentImporter(_ urls: [URL]) {
+        let audioURLs = urls.filter { isAudioFile($0) }
+        guard !audioURLs.isEmpty else { return }
+        do {
+            if playerEngine.queueCount == 0 {
+                try playerEngine.playQueue(urls: audioURLs)
+            } else {
+                for url in audioURLs {
+                    try playerEngine.queue(url: url)
+                }
+            }
+        } catch {
+            print("❌ Playback error: \(error.localizedDescription)")
+            playerEngine.reportError(error.localizedDescription)
+        }
+    }
+    
+    private func isAudioFile(_ url: URL) -> Bool {
+        let ext = url.pathExtension.lowercased()
+        return ["flac", "wav", "mp3", "aiff", "aif", "m4a", "aac", "ogg", "opus",
+                "wv", "wavpack", "dsf", "dff", "ape", "alac"].contains(ext)
     }
     
     // MARK: - Drop Zone

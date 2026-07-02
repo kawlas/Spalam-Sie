@@ -4,8 +4,12 @@ import UniformTypeIdentifiers
 
 /// macOS-native audio player view powered by SFBAudioEngine.
 struct PlayerView: View {
-    @StateObject private var player = AudioPlayerEngine()
+    @ObservedObject var player: AudioPlayerEngine
     @State private var showFilePicker = false
+    
+    init(player: AudioPlayerEngine = AudioPlayerEngine()) {
+        self.player = player
+    }
     
     // Time tracking
     @State private var seekPosition: Double = 0
@@ -34,6 +38,7 @@ struct PlayerView: View {
                 .frame(minWidth: 400, idealWidth: 500)
         }
         .frame(minHeight: 400)
+        .toolbar { toolbarContent }
         .background(isDropTargeted ? Color.accentColor.opacity(0.05) : Color.clear)
         .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
             handleDrop(providers: providers)
@@ -253,7 +258,6 @@ struct PlayerView: View {
             Button(action: { showFilePicker = true }) {
                 Label("Otwórz pliki", systemImage: "folder")
             }
-            .keyboardShortcut("o")
         }
         
         ToolbarItem(placement: .primaryAction) {
@@ -433,7 +437,7 @@ struct PlayerView: View {
     }
     
     /// All supported audio file UTTypes for the file importer.
-    private static let supportedAudioTypes: [UTType] = {
+    static let supportedAudioTypes: [UTType] = {
         var types: [UTType] = [
             .wav, .mp3, .mpeg4Audio, .aiff,
             .audio
@@ -466,6 +470,29 @@ struct PlayerView: View {
         }
         return types
     }()
+    
+    /// Public entry point for ContentView to forward picked files to the player.
+    func importFiles(_ urls: [URL]) {
+        let audioURLs = urls.filter { isAudioFile($0) }
+        guard !audioURLs.isEmpty else {
+            print("⚠️ No supported audio files selected")
+            return
+        }
+        do {
+            if player.queueCount == 0 {
+                try player.playQueue(urls: audioURLs)
+                print("▶️ Playing \(audioURLs.count) file(s)")
+            } else {
+                for url in audioURLs {
+                    try player.queue(url: url)
+                }
+                print("➕ Queued \(audioURLs.count) file(s)")
+            }
+        } catch {
+            print("❌ Playback error: \(error.localizedDescription)")
+            player.reportError(error.localizedDescription)
+        }
+    }
 }
 
 // MARK: - Queue Row

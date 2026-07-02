@@ -683,4 +683,14 @@ final class Spalam_SieTests: XCTestCase {
         XCTAssertEqual(config.bufferSize, 2048)
         XCTAssertEqual(config.timeout, 120)
     }
+    
+    // MARK: - OpenTarget Tests
+    
+    func testOpenTargetForPlayer() {
+        XCTAssertEqual(openTarget(for: .player), .playerFiles)
+    }
+    
+    func testOpenTargetForBurner() {
+        XCTAssertEqual(openTarget(for: .burner), .burnerTracks)
+    }
 }

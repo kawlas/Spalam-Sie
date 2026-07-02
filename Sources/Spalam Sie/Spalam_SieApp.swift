@@ -66,27 +66,7 @@ struct Spalam_SieApp: App {
         .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(after: .importExport) {
-                Button("Add Audio Files...") {
-                    let panel = NSOpenPanel()
-                    panel.allowsMultipleSelection = true
-                    panel.canChooseDirectories = true
-                    panel.allowedContentTypes = [
-                        .wav,
-                        .init(filenameExtension: "flac") ?? .data,
-                        .init(filenameExtension: "mp3") ?? .data,
-                        .init(filenameExtension: "aiff") ?? .data,
-                        .init(filenameExtension: "m4a") ?? .data,
-                        .init(filenameExtension: "cue") ?? .data,
-                    ]
-                    
-                    if panel.runModal() == .OK {
-                        session.addFiles(panel.urls)
-                    }
-                }
-                .keyboardShortcut("o", modifiers: .command)
-                
-                Divider()
-                
+
                 Button("Clear All Tracks") {
                     session.clearTracks()
                 }
